@@ -294,6 +294,21 @@ function SendAnswers({ from, deckTitle, link, onEdit }: { from: string; deckTitl
   );
 }
 
+const COMMIT_DISTANCE = 110;
+const LEAVE_MS = 320;
+
+function intentFor(x: number, y: number): SwipeChoice | undefined {
+  if (Math.abs(x) < 6 && Math.abs(y) < 6) return undefined;
+  if (-y > Math.abs(x)) return 'love';
+  return x > 0 ? 'into' : 'pass';
+}
+
+const LEAVE_TRANSFORM: Record<SwipeChoice, string> = {
+  pass: 'translate3d(-135%, 30px, 0) rotate(-22deg)',
+  into: 'translate3d(135%, 30px, 0) rotate(22deg)',
+  love: 'translate3d(0, -125%, 0) scale(.92)',
+};
+
 function SwipeQuestion({
   question,
   picks,
@@ -310,24 +325,34 @@ function SwipeQuestion({
   const options = question.options;
   const firstOpen = options.findIndex((option) => !picks[option.id]);
   const index = firstOpen === -1 ? options.length : firstOpen;
-  const [stamp, setStamp] = useState<string>();
-  const [drag, setDrag] = useState({ x: 0, y: 0, startX: 0, startY: 0, active: false });
+  const [drag, setDrag] = useState({ x: 0, y: 0, active: false });
+  const [leaving, setLeaving] = useState<SwipeChoice | null>(null);
+  const [hovered, setHovered] = useState<SwipeChoice | null>(null);
+  const origin = useRef({ x: 0, y: 0 });
+  // Pointer events can outrun renders, so handlers read the live drag from here.
+  const live = useRef(drag);
   const busy = useRef(false);
+  const updateDrag = (next: typeof drag) => {
+    live.current = next;
+    setDrag(next);
+  };
 
   const answer = useCallback(
     (choice: SwipeChoice) => {
       const option = options[index];
       if (!option || busy.current) return;
       busy.current = true;
-      setStamp(choice === 'love' ? 'Love it' : choice === 'into' ? 'Into it' : 'Pass');
-      navigator.vibrate?.(12);
+      setLeaving(choice);
+      setHovered(null);
+      navigator.vibrate?.(choice === 'love' ? [10, 40, 18] : 14);
       window.setTimeout(() => {
         busy.current = false;
-        setStamp(undefined);
-        setDrag({ x: 0, y: 0, startX: 0, startY: 0, active: false });
+        setLeaving(null);
+        live.current = { x: 0, y: 0, active: false };
+        setDrag(live.current);
         onChange({ ...picks, [option.id]: choice });
         if (index === options.length - 1) onDone();
-      }, 220);
+      }, LEAVE_MS);
     },
     [index, options, picks, onChange, onDone],
   );
@@ -355,6 +380,18 @@ function SwipeQuestion({
     return () => window.removeEventListener('keydown', onKey);
   }, [answer, undo]);
 
+  // What the gesture currently points at, and how close it is to locking in.
+  const dragIntent = drag.active ? intentFor(drag.x, drag.y) : undefined;
+  const distance = dragIntent === 'love' ? -drag.y : Math.abs(drag.x);
+  const intent = leaving ?? dragIntent ?? hovered ?? undefined;
+  const intensity = leaving ? 1 : dragIntent ? Math.min(1, distance / COMMIT_DISTANCE) : hovered ? 0.45 : 0;
+  const armed = !!leaving || (!!dragIntent && distance >= COMMIT_DISTANCE);
+
+  // A small tick when a drag crosses the line, so it's felt as well as seen.
+  useEffect(() => {
+    if (armed && drag.active) navigator.vibrate?.(8);
+  }, [armed, drag.active, dragIntent]);
+
   if (index >= options.length) {
     return (
       <main className="scroll swipe-complete">
@@ -366,54 +403,92 @@ function SwipeQuestion({
     );
   }
 
-  const dragStamp =
-    drag.y < -55 && Math.abs(drag.y) > Math.abs(drag.x) ? 'Love it' : drag.x > 55 ? 'Into it' : drag.x < -55 ? 'Pass' : undefined;
-  const dragSelection =
-    drag.y < 0 && Math.abs(drag.y) > Math.abs(drag.x) ? 'love' : drag.x > 0 ? 'into' : drag.x < 0 ? 'pass' : undefined;
-  const dragIntensity = Math.min(1, Math.max(Math.abs(drag.x), Math.abs(drag.y)) / 110);
-
   const beginDrag = (event: PointerEvent<HTMLElement>) => {
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setDrag({ x: 0, y: 0, startX: event.clientX, startY: event.clientY, active: true });
+    if (busy.current) return;
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Capture is a nicety; the drag still works without it.
+    }
+    origin.current = { x: event.clientX, y: event.clientY };
+    setHovered(null);
+    updateDrag({ x: 0, y: 0, active: true });
   };
   const moveDrag = (event: PointerEvent<HTMLElement>) => {
-    if (!drag.active) return;
-    setDrag((current) => ({ ...current, x: event.clientX - current.startX, y: Math.min(0, event.clientY - current.startY) }));
+    if (!live.current.active) return;
+    const x = event.clientX - origin.current.x;
+    const y = event.clientY - origin.current.y;
+    // Downward drags meet resistance; there's no "down" choice.
+    updateDrag({ x, y: y > 0 ? y * 0.25 : y, active: true });
   };
   const endDrag = () => {
-    if (!drag.active) return;
-    if (drag.y < -110 && Math.abs(drag.y) > Math.abs(drag.x)) answer('love');
-    else if (drag.x > 110) answer('into');
-    else if (drag.x < -110) answer('pass');
-    else setDrag({ x: 0, y: 0, startX: 0, startY: 0, active: false });
+    const { x, y, active } = live.current;
+    if (!active) return;
+    const choice = intentFor(x, y);
+    const reach = choice === 'love' ? -y : Math.abs(x);
+    if (choice && reach >= COMMIT_DISTANCE) answer(choice);
+    else updateDrag({ x: 0, y: 0, active: false });
+  };
+
+  const topTransform = leaving
+    ? LEAVE_TRANSFORM[leaving]
+    : `translate3d(${drag.x}px, ${drag.y}px, 0) rotate(${drag.x / 16}deg) scale(${drag.active ? 1.02 : 1})`;
+  const next = options[index + 1];
+  const actionProps = (choice: SwipeChoice) => {
+    const active = intent === choice;
+    return {
+      className: `${choice} ${active ? 'active' : ''} ${active && armed ? 'armed' : ''}`,
+      style: { transform: `scale(${active ? 1 + 0.22 * intensity : 1})`, opacity: intent && !active ? 1 - 0.45 * intensity : 1 },
+      onClick: () => answer(choice),
+      onPointerEnter: (event: PointerEvent<HTMLButtonElement>) => event.pointerType === 'mouse' && !drag.active && setHovered(choice),
+      onPointerLeave: () => setHovered(null),
+    };
   };
 
   return (
     <>
       {question.prompt && <p className="swipe-prompt">{question.prompt}</p>}
-      <div className="gesture-coach" aria-hidden="true"><span>← Pass</span><b>↑ Love</b><span>Into it →</span></div>
+      <div className="gesture-coach" aria-hidden="true">
+        <span className={intent === 'pass' ? 'active pass' : ''}>← Pass</span>
+        <span className={intent === 'love' ? 'active love' : ''}>↑ Love it</span>
+        <span className={intent === 'into' ? 'active into' : ''}>Into it →</span>
+      </div>
       <div className="card-stack">
-        <i /><i />
-        <OptionCard
-          key={options[index].id}
-          option={options[index]}
-          index={index}
-          total={options.length}
-          stamp={stamp ?? dragStamp}
-          dragging={drag.active}
-          selection={drag.active ? dragSelection : undefined}
-          intensity={dragIntensity}
-          onPointerDown={beginDrag}
-          onPointerMove={moveDrag}
-          onPointerUp={endDrag}
-          style={{ transform: `translate3d(${drag.x}px, ${drag.y}px, 0) rotate(${drag.x / 24}deg)` }}
-        />
+        <i />
+        {/* Keyed by option, so the card behind becomes the top card without remounting. */}
+        {[next, options[index]].map((option, layer) =>
+          !option ? null : layer === 0 ? (
+            <OptionCard
+              key={option.id}
+              option={option}
+              index={index + 1}
+              total={options.length}
+              className="next-card"
+              style={{ transform: `translateY(${(1 - intensity) * 14}px) scale(${0.93 + 0.07 * intensity})`, opacity: 0.55 + 0.45 * intensity }}
+            />
+          ) : (
+            <OptionCard
+              key={option.id}
+              option={option}
+              index={index}
+              total={options.length}
+              className={`top-card ${drag.active ? 'dragging' : ''} ${leaving ? 'leaving' : ''}`}
+              intent={intent}
+              intensity={intensity}
+              armed={armed}
+              onPointerDown={beginDrag}
+              onPointerMove={moveDrag}
+              onPointerUp={endDrag}
+              style={{ transform: topTransform }}
+            />
+          ),
+        )}
       </div>
       <div className="deck-actions">
-        <button onClick={() => answer('pass')}><Icon name="close" /><span>Pass</span></button>
-        <button onClick={undo} disabled={index === 0}><Icon name="undo" /><span>Undo</span></button>
-        <button className="love" onClick={() => answer('love')}><Icon name="up" /><span>Love it</span></button>
-        <button className="into" onClick={() => answer('into')}><Icon name="arrow" /><span>Into it</span></button>
+        <button {...actionProps('pass')}><Icon name="close" /><span>Pass</span></button>
+        <button className="undo" onClick={undo} disabled={index === 0}><Icon name="undo" /><span>Undo</span></button>
+        <button {...actionProps('love')}><Icon name="heart" /><span>Love it</span></button>
+        <button {...actionProps('into')}><Icon name="arrow" /><span>Into it</span></button>
       </div>
       {partnerPrivacy && <p className="private-caption">{partnerPrivacy}</p>}
     </>

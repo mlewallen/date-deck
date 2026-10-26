@@ -11,6 +11,9 @@ import { QuestionEditor } from './QuestionEditor';
 
 type SetData = Dispatch<SetStateAction<AppData>>;
 
+/** Links above this length (characters) get a heads-up in the send sheet. */
+const LONG_LINK = 55_000;
+
 export function Onboarding({ onDone }: { onDone: (profile: Profile) => void }) {
   const [me, setMe] = useState('');
   const [partner, setPartner] = useState('');
@@ -412,6 +415,11 @@ function SendSheet({ deck, profile, onSent, onClose }: { deck: Deck; profile: Pr
       <PrimaryButton onClick={send} disabled={!link}><span className="button-row"><Icon name="share" /> Share link</span></PrimaryButton>
       <button className="text-button" onClick={copy} disabled={!link}>Copy link</button>
       {link && <input className="link-field" readOnly value={link} aria-label="Invite link" onFocus={(event) => event.currentTarget.select()} />}
+      {link && link.length > LONG_LINK && (
+        <p className="soft-warning">
+          Your uploaded photos make this link long ({Math.round(link.length / 1000)}K characters). iMessage and email usually handle it, but WhatsApp and some other apps cut long links off. If {profile.partner} can’t open it, swap a few photos for colors.
+        </p>
+      )}
       <p className="fine-print">Edit the deck after sending? Send it again so {profile.partner} gets the latest version.</p>
     </Sheet>
   );
