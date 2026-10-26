@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { PrimaryButton, Toaster } from './components/ui';
+import { PrimaryButton, Toaster, toast } from './components/ui';
 import { go, useRoute } from './lib/router';
 import { readInvite, sharedDeck } from './lib/share';
 import { useAppData } from './lib/storage';
@@ -32,7 +32,7 @@ function Screens() {
   const { data, setData, updateDeck, saveFailed } = useAppData();
 
   useEffect(() => {
-    if (saveFailed) console.warn('Date Deck could not save to localStorage.');
+    if (saveFailed) toast('Couldn’t save — this browser’s storage is full. Remove some uploaded photos or old decks.');
   }, [saveFailed]);
 
   // Links from a partner work without any setup on this device.

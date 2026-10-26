@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CSSProperties, PointerEvent, ReactNode } from 'react';
 import { optionBackground } from '../lib/content';
-import type { Option } from '../lib/types';
+import type { Option, SwipeChoice } from '../lib/types';
 
 const ICONS: Record<string, ReactNode> = {
   spark: <><path d="M12 2.8c.5 5.3 2 6.8 7.2 7.2-5.2.5-6.7 2-7.2 7.2-.5-5.2-2-6.7-7.2-7.2 5.2-.4 6.7-1.9 7.2-7.2Z" /><path d="M19 16.5c.2 2 .8 2.6 2.8 2.8-2 .2-2.6.8-2.8 2.7-.2-1.9-.8-2.5-2.8-2.7 2-.2 2.6-.8 2.8-2.8Z" /></>,
@@ -28,6 +28,7 @@ const ICONS: Record<string, ReactNode> = {
   heart: <path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 7.4 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10Z" />,
   inbox: <><path d="M4 13h4l1.5 3h5L16 13h4" /><path d="M5.5 5h13L20 13v6H4v-6l1.5-8Z" /></>,
   download: <><path d="M12 4v11" /><path d="m7 10 5 5 5-5" /><path d="M5 20h14" /></>,
+  camera: <><path d="M4 8h3l2-3h6l2 3h3v11H4V8Z" /><circle cx="12" cy="13" r="3.5" /></>,
 };
 
 export type IconName = keyof typeof ICONS;
@@ -157,15 +158,43 @@ export function EmptyState({ icon, title, children }: { icon: IconName; title: s
   );
 }
 
+export const INTENT: Record<SwipeChoice, { label: string; icon: IconName }> = {
+  pass: { label: 'Pass', icon: 'close' },
+  into: { label: 'Into it', icon: 'arrow' },
+  love: { label: 'Love it', icon: 'heart' },
+};
+
+const RING = 2 * Math.PI * 44;
+
+/** Grows in as the card is dragged; the ring fills until the choice locks in. */
+function IntentBadge({ intent, intensity, armed }: { intent: SwipeChoice; intensity: number; armed: boolean }) {
+  return (
+    <div
+      className={`intent-badge ${intent} ${armed ? 'armed' : ''}`}
+      style={{ opacity: Math.min(1, intensity * 1.6), transform: `translate(-50%, -50%) scale(${0.55 + 0.45 * intensity})` }}
+      aria-hidden="true"
+    >
+      <span className="intent-ring">
+        <svg viewBox="0 0 96 96">
+          <circle cx="48" cy="48" r="44" className="track" />
+          <circle cx="48" cy="48" r="44" className="fill" strokeDasharray={RING} strokeDashoffset={RING * (1 - intensity)} />
+        </svg>
+        <Icon name={INTENT[intent].icon} />
+      </span>
+      <b>{INTENT[intent].label}</b>
+    </div>
+  );
+}
+
 export function OptionCard({
   option,
   index,
   total,
-  stamp,
+  className = '',
   style,
-  dragging,
-  selection,
+  intent,
   intensity = 0,
+  armed = false,
   onPointerDown,
   onPointerMove,
   onPointerUp,
@@ -173,18 +202,18 @@ export function OptionCard({
   option: Option;
   index: number;
   total: number;
-  stamp?: string;
+  className?: string;
   style?: CSSProperties;
-  dragging?: boolean;
-  selection?: 'pass' | 'into' | 'love';
+  intent?: SwipeChoice;
   intensity?: number;
+  armed?: boolean;
   onPointerDown?: (event: PointerEvent<HTMLElement>) => void;
   onPointerMove?: (event: PointerEvent<HTMLElement>) => void;
   onPointerUp?: (event: PointerEvent<HTMLElement>) => void;
 }) {
   return (
     <article
-      className={`vibe-card ${dragging ? 'dragging' : ''} ${selection ? `selecting ${selection}` : ''}`}
+      className={`vibe-card ${className} ${intent ? `selecting ${intent}` : ''}`}
       style={{ ...optionBackground(option, index), '--selection-strength': intensity, ...style } as CSSProperties}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
@@ -194,7 +223,7 @@ export function OptionCard({
     >
       <div className="shade" />
       <div className="selection-glow" />
-      {stamp && <div className={`stamp ${stamp.toLowerCase().replace(' ', '-')}`} aria-hidden="true">{stamp}</div>}
+      {intent && <IntentBadge intent={intent} intensity={intensity} armed={armed} />}
       <div className="vibe-copy">
         <div className="card-kicker"><small>POSSIBILITY</small><span>{index + 1} of {total}</span></div>
         <h2>{option.title || 'Untitled'}</h2>

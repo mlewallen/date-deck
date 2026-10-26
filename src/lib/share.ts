@@ -1,3 +1,4 @@
+import { isPhotoData } from './photos';
 import type { AnswerPayload, Deck, DeckResponse, InvitePayload, SharedDeck } from './types';
 
 /*
@@ -44,10 +45,29 @@ function isSharedDeck(deck: SharedDeck | undefined): deck is SharedDeck {
   return !!deck && typeof deck.id === 'string' && typeof deck.title === 'string' && Array.isArray(deck.questions);
 }
 
+const SAFE_PHOTO = /^(|p:[a-z]+|tone:\d+|https:\/\/[^\s"'()\\]+)$/i;
+
+/** Drops any photo value a link shouldn't carry, so cards fall back to a color. */
+function cleanDeck(deck: SharedDeck, keepUploads = true): SharedDeck {
+  return {
+    ...deck,
+    questions: deck.questions.map((question) => ({
+      ...question,
+      options: (question.options ?? []).map((option) => ({
+        ...option,
+        photo:
+          typeof option.photo === 'string' && (SAFE_PHOTO.test(option.photo) || (keepUploads && isPhotoData(option.photo)))
+            ? option.photo
+            : '',
+      })),
+    })),
+  };
+}
+
 export async function readInvite(text: string): Promise<InvitePayload | null> {
   try {
     const payload = (await decodePayload(text)) as InvitePayload;
-    return payload?.t === 'invite' && isSharedDeck(payload.deck) ? payload : null;
+    return payload?.t === 'invite' && isSharedDeck(payload.deck) ? { ...payload, deck: cleanDeck(payload.deck) } : null;
   } catch {
     return null;
   }
@@ -56,7 +76,9 @@ export async function readInvite(text: string): Promise<InvitePayload | null> {
 export async function readAnswers(text: string): Promise<AnswerPayload | null> {
   try {
     const payload = (await decodePayload(text)) as AnswerPayload;
-    return payload?.t === 'answers' && isSharedDeck(payload.deck) && !!payload.response?.answers ? payload : null;
+    return payload?.t === 'answers' && isSharedDeck(payload.deck) && !!payload.response?.answers
+      ? { ...payload, deck: cleanDeck(payload.deck) }
+      : null;
   } catch {
     return null;
   }
@@ -76,7 +98,8 @@ export async function inviteLink(deck: Deck, from: string, to: string) {
 }
 
 export async function answersLink(deck: SharedDeck, to: string, response: DeckResponse) {
-  const payload: AnswerPayload = { t: 'answers', v: 1, to, deck, response };
+  // The planner already has the photos; leaving uploads out keeps the reply link short.
+  const payload: AnswerPayload = { t: 'answers', v: 1, to, deck: cleanDeck(deck, false), response };
   return appUrl(`/answers/${await encodePayload(payload)}`);
 }
 

@@ -1,4 +1,5 @@
 import type { CSSProperties } from 'react';
+import { isPhotoData } from './photos';
 import { newId } from './storage';
 import type { Answer, Deck, Option, Question, QuestionKind, SwipeChoice, VersusChoice } from './types';
 
@@ -32,6 +33,7 @@ export const TONES = [
 export function photoUrl(photo: string) {
   if (photo.startsWith('p:')) return PRESET_PHOTOS.find((preset) => preset.key === photo)?.url ?? null;
   if (/^https:\/\//i.test(photo)) return photo;
+  if (isPhotoData(photo)) return photo;
   return null;
 }
 

@@ -1,6 +1,7 @@
-import { useState } from 'react';
-import { Icon, PrimaryButton, Sheet } from '../components/ui';
+import { useRef, useState } from 'react';
+import { Icon, PrimaryButton, Sheet, toast } from '../components/ui';
 import { KIND_HINT, KIND_LABEL, PRESET_PHOTOS, TONES, blankOption, blankQuestion, optionBackground } from '../lib/content';
+import { compressPhoto, isPhotoData } from '../lib/photos';
 import type { Option, Question, QuestionKind } from '../lib/types';
 
 const MAX_OPTIONS = 12;
@@ -130,7 +131,23 @@ function OptionEditor({
   onRemove?: () => void;
 }) {
   const custom = /^https:\/\//i.test(option.photo);
+  const uploaded = isPhotoData(option.photo);
   const [showLink, setShowLink] = useState(custom);
+  const [processing, setProcessing] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const upload = async (file: File | undefined) => {
+    if (!file) return;
+    setProcessing(true);
+    try {
+      onChange({ photo: await compressPhoto(file) });
+      setShowLink(false);
+    } catch {
+      toast('That photo couldn’t be opened. Try a JPEG or PNG.');
+    } finally {
+      setProcessing(false);
+    }
+  };
   return (
     <fieldset className="option-editor">
       <legend>{label}</legend>
@@ -139,6 +156,17 @@ function OptionEditor({
         {onRemove && <button className="icon-button light" aria-label={`Remove ${label}`} onClick={onRemove}><Icon name="trash" /></button>}
       </div>
       <div className="swatches" role="radiogroup" aria-label="Card background">
+        <button
+          className={`upload-swatch ${uploaded ? 'selected' : ''}`}
+          role="radio"
+          aria-checked={uploaded}
+          aria-label={uploaded ? 'Replace uploaded photo' : 'Upload a photo'}
+          style={uploaded ? { backgroundImage: `url(${option.photo})` } : undefined}
+          disabled={processing}
+          onClick={() => fileInput.current?.click()}
+        >
+          {processing ? <span className="spinner" /> : !uploaded && <Icon name="camera" />}
+        </button>
         {PRESET_PHOTOS.map((preset) => (
           <button
             key={preset.key}
@@ -165,6 +193,16 @@ function OptionEditor({
           URL
         </button>
       </div>
+      <input
+        ref={fileInput}
+        type="file"
+        accept="image/*"
+        hidden
+        onChange={(event) => {
+          upload(event.target.files?.[0]);
+          event.target.value = '';
+        }}
+      />
       {showLink && (
         <label className="field">
           <span>IMAGE LINK (HTTPS)</span>
