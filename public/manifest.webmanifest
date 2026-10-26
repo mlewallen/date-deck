@@ -1,0 +1,13 @@
+{
+  "name": "Date Deck",
+  "short_name": "Date Deck",
+  "description": "Ask the questions, collect the answers, keep the date a surprise.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f6f4ec",
+  "theme_color": "#f6f4ec",
+  "icons": [
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml" }
+  ]
+}
