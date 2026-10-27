@@ -92,9 +92,41 @@ function appUrl(route: string) {
   return `${window.location.origin}${window.location.pathname}#${route}`;
 }
 
-export async function inviteLink(deck: Deck, from: string, to: string) {
-  const payload: InvitePayload = { t: 'invite', v: 1, from, to, deck: sharedDeck(deck) };
-  return appUrl(`/play/${await encodePayload(payload)}`);
+export type InviteLink = { url: string; short: boolean };
+
+/**
+ * Stores the invite with the app's share API and returns a short #/s/<id>
+ * link. If the API can't be reached, falls back to the self-contained
+ * #/play/<payload> link, which works anywhere but can be very long.
+ */
+export async function inviteLink(deck: Deck, from: string, to: string): Promise<InviteLink> {
+  const invite: InvitePayload = { t: 'invite', v: 1, from, to, deck: sharedDeck(deck) };
+  const payload = await encodePayload(invite);
+  try {
+    const response = await fetch('/api/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload }),
+    });
+    const { id } = (await response.json()) as { id?: string };
+    if (response.ok && id && /^[A-Za-z0-9]{12}$/.test(id)) return { url: appUrl(`/s/${id}`), short: true };
+  } catch {
+    // Offline, or a static host without the function.
+  }
+  return { url: appUrl(`/play/${payload}`), short: false };
+}
+
+export type ShortLinkResult = { payload: string } | { error: 'not-found' | 'offline' };
+
+export async function resolveShortLink(id: string): Promise<ShortLinkResult> {
+  try {
+    const response = await fetch(`/api/share/${encodeURIComponent(id)}`);
+    if (response.status === 404) return { error: 'not-found' };
+    const { payload } = (await response.json()) as { payload?: string };
+    return response.ok && typeof payload === 'string' ? { payload } : { error: 'offline' };
+  } catch {
+    return { error: 'offline' };
+  }
 }
 
 export async function answersLink(deck: SharedDeck, to: string, response: DeckResponse) {

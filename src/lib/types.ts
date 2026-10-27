@@ -40,6 +40,8 @@ export type Deck = {
   createdAt: number;
   updatedAt: number;
   sentAt?: number;
+  /** Short invite link, reused until the deck or names change (see `version`). */
+  shareLink?: { url: string; version: string };
   response?: DeckResponse;
 };
 

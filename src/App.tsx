@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { PrimaryButton, Toaster, toast } from './components/ui';
 import { go, useRoute } from './lib/router';
-import { readInvite, sharedDeck } from './lib/share';
+import { readInvite, resolveShortLink, sharedDeck } from './lib/share';
 import { useAppData } from './lib/storage';
 import type { InvitePayload } from './lib/types';
 import { Picker } from './screens/Picker';
@@ -27,6 +27,39 @@ function PlayFromLink({ payload }: { payload: string }) {
   return <Picker key={payload} deck={invite.deck} from={invite.from} to={invite.to} mode="link" />;
 }
 
+/** #/s/<id>: fetch the stored invite, then continue as a normal #/play/ link. */
+function OpenShortLink({ id }: { id: string }) {
+  const [error, setError] = useState<'not-found' | 'offline' | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    let live = true;
+    setError(null);
+    resolveShortLink(id).then((result) => {
+      if (!live) return;
+      if ('payload' in result) go(`/play/${result.payload}`, { replace: true });
+      else setError(result.error);
+    });
+    return () => {
+      live = false;
+    };
+  }, [id, attempt]);
+
+  if (!error) return <section className="full-screen done-screen"><p className="eyebrow">OPENING YOUR INVITATION…</p></section>;
+  return (
+    <section className="full-screen done-screen">
+      <p className="eyebrow">HMM</p>
+      <h2 className="display">{error === 'offline' ? 'Couldn’t reach Date Deck.' : 'That invitation didn’t open.'}</h2>
+      <p>
+        {error === 'offline'
+          ? 'Check your connection and try again.'
+          : 'The link may be mistyped or cut off. Ask for it to be sent again.'}
+      </p>
+      {error === 'offline' && <PrimaryButton onClick={() => setAttempt((count) => count + 1)}>Try again</PrimaryButton>}
+      <button className="text-button" onClick={() => go('/', { replace: true })}>Go to Date Deck</button>
+    </section>
+  );
+}
+
 function Screens() {
   const route = useRoute();
   const { data, setData, updateDeck, saveFailed } = useAppData();
@@ -36,6 +69,7 @@ function Screens() {
   }, [saveFailed]);
 
   // Links from a partner work without any setup on this device.
+  if (route.name === 'short') return <OpenShortLink id={route.id} />;
   if (route.name === 'play') return <PlayFromLink payload={route.payload} />;
   if (route.name === 'answers') return <ImportAnswers payload={route.payload} data={data} setData={setData} />;
 

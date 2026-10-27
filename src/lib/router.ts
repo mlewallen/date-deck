@@ -7,6 +7,7 @@ export type Route =
   | { name: 'here'; id: string }
   | { name: 'preview'; id: string }
   | { name: 'play'; payload: string }
+  | { name: 'short'; id: string }
   | { name: 'answers'; payload: string };
 
 export function parseRoute(hash: string): Route {
@@ -18,6 +19,7 @@ export function parseRoute(hash: string): Route {
     return { name: 'deck', id: second, tab: third === 'answers' ? 'answers' : 'questions' };
   }
   if (first === 'play' && second) return { name: 'play', payload: second };
+  if (first === 's' && second) return { name: 'short', id: second };
   if (first === 'answers' && second) return { name: 'answers', payload: second };
   return { name: 'home' };
 }

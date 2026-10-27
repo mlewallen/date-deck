@@ -1,4 +1,4 @@
-# Netlify build settings for Date Deck (static Vite app, no server functions).
+# Netlify build settings for Date Deck (static Vite app + one function for short links).
 [build]
   command = "pnpm run build"
   publish = "dist"
@@ -6,12 +6,10 @@
 [build.environment]
   NODE_VERSION = "22"
 
-# Single-page app: any unknown path serves the app. Decks and answers travel in
-# the URL hash (#/play/…, #/answers/…), which never reaches Netlify.
-[[redirects]]
-  from = "/*"
-  to = "/index.html"
-  status = 200
+# Short invite links (/api/share) are stored in Netlify Blobs by this function.
+# The app routes in the URL hash, so no SPA redirect is needed.
+[functions]
+  directory = "netlify/functions"
 
 [[headers]]
   for = "/*"
