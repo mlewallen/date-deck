@@ -4,6 +4,7 @@ import { AppHeader, EmptyState, Icon, PrimaryButton, Sheet, toast } from '../com
 import { KIND_LABEL, TEMPLATES, duplicateDeck, formatDate, isAnswered, newDeck } from '../lib/content';
 import { go } from '../lib/router';
 import { copyText, inviteLink, payloadFromPaste, readAnswers, shareLink } from '../lib/share';
+import type { InviteLink } from '../lib/share';
 import { parseBackup } from '../lib/storage';
 import type { AnswerPayload, AppData, Deck, Profile, Question } from '../lib/types';
 import { AnswersView } from './AnswersView';
@@ -11,8 +12,8 @@ import { QuestionEditor } from './QuestionEditor';
 
 type SetData = Dispatch<SetStateAction<AppData>>;
 
-/** Links above this length (characters) get a heads-up in the send sheet. */
-const LONG_LINK = 55_000;
+/** Fallback links above this length (characters) get a heads-up in the send sheet. */
+const LONG_LINK = 8_000;
 
 export function Onboarding({ onDone }: { onDone: (profile: Profile) => void }) {
   const [me, setMe] = useState('');
@@ -327,7 +328,15 @@ export function DeckScreen({
           onClose={() => setEditing(null)}
         />
       )}
-      {sheet === 'send' && <SendSheet deck={deck} profile={profile} onSent={() => update((current) => ({ ...current, sentAt: Date.now() }), false)} onClose={() => setSheet(null)} />}
+      {sheet === 'send' && (
+        <SendSheet
+          deck={deck}
+          profile={profile}
+          onSent={() => update((current) => ({ ...current, sentAt: Date.now() }), false)}
+          onLink={(shareLink) => update((current) => ({ ...current, shareLink }), false)}
+          onClose={() => setSheet(null)}
+        />
+      )}
       {sheet === 'details' && (
         <DeckDetailsSheet
           deck={deck}
@@ -382,26 +391,48 @@ export function DeckScreen({
   );
 }
 
-function SendSheet({ deck, profile, onSent, onClose }: { deck: Deck; profile: Profile; onSent: () => void; onClose: () => void }) {
-  const [link, setLink] = useState<string | null>(null);
+function SendSheet({
+  deck,
+  profile,
+  onSent,
+  onLink,
+  onClose,
+}: {
+  deck: Deck;
+  profile: Profile;
+  onSent: () => void;
+  onLink: (shareLink: NonNullable<Deck['shareLink']>) => void;
+  onClose: () => void;
+}) {
+  // Same deck content and names → same link, so opening this sheet doesn't mint new ones.
+  const version = `${window.location.origin}|${deck.updatedAt}|${profile.me}|${profile.partner}`;
+  const cached = deck.shareLink?.version === version ? deck.shareLink.url : null;
+  const [link, setLink] = useState<InviteLink | null>(cached ? { url: cached, short: true } : null);
   useEffect(() => {
+    if (cached) return;
     let live = true;
-    inviteLink(deck, profile.me, profile.partner).then((url) => live && setLink(url));
+    inviteLink(deck, profile.me, profile.partner).then((next) => {
+      if (!live) return;
+      setLink(next);
+      if (next.short) onLink({ url: next.url, version });
+    });
     return () => {
       live = false;
     };
-  }, [deck, profile]);
+    // Rebuild only when the content behind the link changes.
+  }, [version]);
 
+  const url = link?.url;
   const send = async () => {
-    if (!link) return;
-    const result = await shareLink(link, deck.title, `${profile.me} made you a Date Deck: “${deck.title}”`);
+    if (!url) return;
+    const result = await shareLink(url, deck.title, `${profile.me} made you a Date Deck: “${deck.title}”`);
     if (result === 'shared' || result === 'copied') onSent();
     if (result === 'copied') toast(`Link copied — paste it in a message to ${profile.partner}`);
     if (result === 'failed') toast('Couldn’t copy automatically. Copy the link below.');
     if (result !== 'cancelled' && result !== 'failed') onClose();
   };
   const copy = async () => {
-    if (link && (await copyText(link))) {
+    if (url && (await copyText(url))) {
       onSent();
       toast('Link copied');
     }
@@ -410,14 +441,19 @@ function SendSheet({ deck, profile, onSent, onClose }: { deck: Deck; profile: Pr
   return (
     <Sheet title={`Send to ${profile.partner}`} onClose={onClose} left={<span />} right={<button onClick={onClose}>Done</button>}>
       <p className="sheet-copy">
-        {profile.partner} opens the link on their phone, answers, then sends a link back to you. The deck lives inside the link itself — it never goes to a server.
+        {profile.partner} opens the link on their phone, answers, then sends a link back to you.{' '}
+        {link?.short === false
+          ? 'This link carries the whole deck inside it.'
+          : 'Only someone with the link can open this deck.'}
       </p>
-      <PrimaryButton onClick={send} disabled={!link}><span className="button-row"><Icon name="share" /> Share link</span></PrimaryButton>
-      <button className="text-button" onClick={copy} disabled={!link}>Copy link</button>
-      {link && <input className="link-field" readOnly value={link} aria-label="Invite link" onFocus={(event) => event.currentTarget.select()} />}
-      {link && link.length > LONG_LINK && (
+      <PrimaryButton onClick={send} disabled={!url}>
+        <span className="button-row"><Icon name="share" /> {url ? 'Share link' : 'Making link…'}</span>
+      </PrimaryButton>
+      <button className="text-button" onClick={copy} disabled={!url}>Copy link</button>
+      {url && <input className="link-field" readOnly value={url} aria-label="Invite link" onFocus={(event) => event.currentTarget.select()} />}
+      {link?.short === false && url && url.length > LONG_LINK && (
         <p className="soft-warning">
-          Your uploaded photos make this link long ({Math.round(link.length / 1000)}K characters). iMessage and email usually handle it, but WhatsApp and some other apps cut long links off. If {profile.partner} can’t open it, swap a few photos for colors.
+          Couldn’t make a short link (are you offline?), so this one is long ({Math.round(url.length / 1000)}K characters) and some messaging apps may cut it off. Try again when you’re connected.
         </p>
       )}
       <p className="fine-print">Edit the deck after sending? Send it again so {profile.partner} gets the latest version.</p>
